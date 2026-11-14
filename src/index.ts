@@ -1,6 +1,11 @@
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Input, SelectList, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { canOpen, clean, filterSessions } from "./model.ts";
+import { matchesKey } from "@earendil-works/pi-tui";
+import { canOpen } from "./model.ts";
+import { CommandCenter, type CenterTask } from "./command-center.ts";
+import { pinKey, readPins, setPinned } from "./pins.ts";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { sessionDetails } from "./details.ts";
 
 export default function sessionHistory(pi: ExtensionAPI) {
   let opening = false;
@@ -32,50 +37,39 @@ export default function sessionHistory(pi: ExtensionAPI) {
       opening = true;
       try {
         const current = ctx.sessionManager.getSessionFile();
-        const sessions = (await SessionManager.listAll()).filter(s => s.path !== current);
-        if (!sessions.length) { ctx.ui.notify("No other saved sessions", "info"); return; }
-        const selected = await ctx.ui.custom<string | undefined>((tui, theme, keys, done) => {
-          const input = new Input();
-          let localOnly = false;
-          const makeList = () => {
-            const rows = filterSessions(sessions, input.getValue(), localOnly ? ctx.cwd : undefined);
-            const list = new SelectList(rows.map(s => ({ value: s.path,
-              label: clean(s.name || s.firstMessage || "Untitled session"),
-              description: `${s.modified.toLocaleDateString()} · ${s.messageCount} messages · ${clean(s.cwd)}`,
-            })), Math.max(1, Math.min(9, tui.terminal.rows - 12)), {
-              selectedPrefix: t => theme.fg("accent", t), selectedText: t => theme.fg("accent", t),
-              description: t => theme.fg("muted", t), scrollInfo: t => theme.fg("dim", t),
-              noMatch: t => theme.fg("muted", t),
-            });
-            list.onSelect = item => done(item.value);
-            list.onCancel = () => done(undefined);
-            return list;
-          };
-          let list = makeList();
-          return {
-            get focused() { return input.focused; },
-            set focused(value: boolean) { input.focused = value; },
-            render(width: number) {
-              const chosen = sessions.find(s => s.path === list.getSelectedItem()?.value);
-              return [theme.fg("accent", "Session history"),
-                theme.fg("dim", `${localOnly ? "Current project" : "All projects"} · Tab changes scope · type to search`),
-                ...input.render(width), ...list.render(width),
-                theme.fg("border", "─".repeat(width)),
-                ...wrapTextWithAnsi(clean(chosen?.firstMessage ?? "No matching sessions"), Math.max(1, width)).slice(0, 3),
-                theme.fg("dim", "↑↓ select · Enter resume · Esc/→ close"),
-              ].map(line => truncateToWidth(line, width));
+        const sessions = await SessionManager.listAll();
+        const pinDirectory = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "session-history-pins");
+        const pins = await readPins(pinDirectory);
+        const tasks: CenterTask[] = sessions.map(s => ({
+          id: s.path, sessionFile: s.path, title: s.name || s.firstMessage || "Untitled task",
+          cwd: s.cwd || ctx.cwd, project: s.cwd || ctx.cwd, model: s.path === current ? ctx.model?.id ?? "—" : "—",
+          status: s.path === current ? "Ready" : "Inactive", current: s.path === current,
+          modified: s.modified, preview: s.firstMessage, pinned: pins.has(pinKey(s.path)),
+        }));
+        if (!tasks.some(task => task.current)) tasks.push({ id: current || "current", sessionFile: current,
+          title: ctx.sessionManager.getSessionName?.() || "Untitled task", cwd: ctx.cwd, project: ctx.cwd,
+          model: ctx.model?.id ?? "—", status: "Ready", current: true, modified: new Date(), preview: "" });
+        const selected = await ctx.ui.custom<string | undefined>((tui, theme, _keys, done) => {
+          const center = new CommandCenter(tasks, theme, () => tui.requestRender(), async (action, task) => {
+            if (!task) return;
+            if (action === "open") { done(task.current ? undefined : task.sessionFile); return; }
+            if (action === "pin" && task.sessionFile) {
+              await setPinned(pinDirectory, task.sessionFile, !task.pinned);
+              task.pinned = !task.pinned; center.update(tasks);
+            }
+          }, () => done(undefined), () => tui.terminal.rows, { fullHeight: true, actions: ["open", "pin"],
+            onSelection: task => {
+              if (!task.sessionFile) return;
+              void sessionDetails(task.sessionFile).then(details => {
+                if (details.model && !task.current) task.model = details.model;
+                if (details.reasoning) task.reasoning = details.reasoning;
+                if (opening) center.update(tasks);
+              }).catch(() => {});
             },
-            handleInput(data: string) {
-              if (matchesKey(data, "escape") || matchesKey(data, "right")) { done(undefined); return; }
-              if (matchesKey(data, "tab")) { localOnly = !localOnly; list = makeList(); }
-              else if (keys.matches(data, "tui.select.up") || keys.matches(data, "tui.select.down") ||
-                keys.matches(data, "tui.select.confirm") || matchesKey(data, "pageUp") || matchesKey(data, "pageDown")) list.handleInput(data);
-              else { input.handleInput(data); list = makeList(); }
-              tui.requestRender();
-            },
-            invalidate() { input.invalidate(); list.invalidate(); },
-          };
-        });
+          });
+          center.selected = tasks.find(task => task.current)?.id ?? tasks[0]?.id;
+          return center;
+        }, { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left" } });
         if (!selected) return;
         if (ctx.ui.getEditorText() && !await ctx.ui.confirm("Switch session?", "The current draft will be replaced.")) return;
         await ctx.switchSession(selected);

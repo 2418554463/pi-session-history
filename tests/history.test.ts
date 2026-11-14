@@ -69,7 +69,7 @@ it("renders narrow widths, searches and closes through the component", async () 
   const s = setup(); let component: any; const done = vi.fn();
   s.ctx.ui.custom.mockImplementation((factory: any) => {
     component = factory({ requestRender: vi.fn(), terminal: { rows: 30 } },
-      { fg: (_: string, text: string) => text },
+      { fg: (_: string, text: string) => text, bg: (_: string, text: string) => text, bold: (text: string) => text },
       { matches: (data: string, key: string) => matchesKey(data, ({
         "tui.select.up": "up", "tui.select.down": "down", "tui.select.confirm": "enter",
       } as any)[key]) }, done);
@@ -77,7 +77,7 @@ it("renders narrow widths, searches and closes through the component", async () 
   });
   await s.command(); component.focused = true;
   expect(component.render(12).every((line: string) => visibleWidth(line) <= 12)).toBe(true);
-  component.handleInput("\t"); component.handleInput("图"); component.handleInput("\r");
+  component.handleInput("/"); component.handleInput("图"); component.handleInput("\r"); component.handleInput("\r");
   expect(done).toHaveBeenCalledWith("/s/one");
   component.handleInput("\x1b"); expect(done).toHaveBeenCalledWith(undefined);
 });

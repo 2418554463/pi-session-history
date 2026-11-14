@@ -1,33 +1,43 @@
 # pi-session-history
 
-Codex-inspired history navigation for Pi: press **← in an empty input box** to open a searchable list of saved sessions.
+A Codex-style project/session overview for Pi. Start Pi from **any directory**, press **← on an empty composer**, and resume an old session in **its own working directory** automatically.
 
 ## Install
 
-Requires Pi **1.5.0+**.
+Requires Pi 1.5.0+.
 
 ```sh
 pi install git:github.com/2418554463/pi-session-history
 ```
 
-Run `/reload`. Local development: `npm install`, then `pi install /absolute/path/to/pi-session-history`.
+Run `/reload`. Local checkout: `pi install /absolute/path/to/pi-session-history`.
 
-## Keys
+## Overview
 
-- Empty composer + `←`: open history. Nonempty drafts retain normal cursor movement.
-- `/session-history`: also opens the list.
-- Type: search session names, first messages and project paths (multiple search terms supported).
-- `↑` / `↓`: select; Enter: resume.
-- Tab: switch between all projects and the current project.
-- Esc / `→`: close without switching.
+The screen follows Codex CLI 0.167.2's agent command center: header, status tabs, horizontal separator, grouped task rows, selected-row highlight and footer. It fills the terminal. At 94 columns or wider (90-column body), the right-hand 38-column details pane appears with a 3-column separator. Narrow terminals hide details.
 
-The list shows date, message count and project path; the selected session's first message appears below. Most recently modified sessions come first. The current session is omitted. This is saved-session history, not an overview of live subagents or a background-session scheduler.
+- **←** on an empty idle composer, or `/session-history`: open.
+- **↑/↓**, **PgUp/PgDn**: select.
+- **Enter / o**: resume in the selected session's recorded directory, without a manual `cd` or a directory prompt.
+- **/ / F3**: search names, prompts and directories; Enter leaves search mode.
+- **Tab / Shift+Tab**: cycle status filters.
+- **g**: cycle Project / Directory / Status / Model grouping.
+- **p**: pin/unpin; pins persist under the agent configuration directory.
+- **?**: help. **Esc / →**: back.
 
-## Safety and compatibility
+Resuming uses Pi's native `ctx.switchSession(path)`. Pi rebuilds the target workspace's services and built-in tool paths. This changes Pi's working directory, **not the directory of the parent shell**. Missing/deleted session directories produce an error rather than silently using the launch directory. The current session is included; selecting it closes the overview without reloading it.
 
-Uses Pi's `SessionManager` and command-context `switchSession()`; it does not rewrite session files. It does not replace the editor or add a footer/widget, so it coexists with the image-preview extension. Session switching is disabled while an agent task is active, and a nonempty draft requires confirmation. Standard UI prompt events suppress the shortcut while dialogs are active. Other extensions' custom screens that do not emit these events may need shortcut coordination; `/session-history` remains an alternative entry point.
+## Honest scope
 
-Codex's empty-prompt trigger was researched in [agents_navigation.rs](https://github.com/openai/codex/blob/main/codex-rs/tui/src/bottom_pane/chat_composer/agents_navigation.rs); this plugin is an independent Pi implementation.
+This release connects the **saved-session overview and cross-directory resume**. It is not complete functional parity with Codex's daemon-backed task manager:
+
+- Current session is Ready; other saved sessions are Inactive **in this view**, not evidence that no other Pi process is using them. External processes are not monitored.
+- Project and Directory currently both use the recorded cwd; worktree-root collapsing is not implemented.
+- Model/reasoning metadata loads lazily from the selected session. Missing, unreadable, or >16 MiB files show `—` rather than guessed values.
+- New/worktree/fork/rename/stop/archive/delete are not enabled or advertised as working actions in the installed view.
+- Background-service and RPC-worker modules are development scaffolding, **not auto-started** by this release. Switching away from an actively running foreground task is not implemented; the idle guard remains.
+
+No Pi-core changes or global CLI replacement are needed for cross-directory resume. The extension does not replace the editor and works alongside pi-image-preview. A nonempty draft requires confirmation before replacement. Standard UI prompts suppress the Left shortcut; custom screens from other extensions may need shortcut coordination.
 
 ## Development
 
@@ -37,4 +47,4 @@ npm run check
 npm test
 ```
 
-Tests cover activation guards, command dispatch, draft preservation, search/project filtering, session selection, cancellation, narrow rendering and cleanup. Real terminal behavior and session replacement need manual verification after installation.
+The UI was implemented after inspecting upstream `rust-v0.167.2` sources in `codex-rs/tui/src/app/agent_center/`. Automated tests cover layout breakpoints, keyboard navigation, filtering, pins, metadata, native command dispatch and the experimental service's ownership/authentication. A real Pi RPC smoke test additionally verified `bash pwd` changes from launch directory A to restored directory B without sending a model request. Visual parity still needs manual checking in a terminal.
