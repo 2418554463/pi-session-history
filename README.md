@@ -16,6 +16,8 @@ Run `/reload`. Local checkout: `pi install /absolute/path/to/pi-session-history`
 
 The screen follows Codex CLI 0.167.2's agent command center: header, status tabs, horizontal separator, grouped task rows, selected-row highlight and footer. It fills the terminal. At 94 columns or wider (90-column body), the right-hand 38-column details pane appears with a 3-column separator. Narrow terminals hide details.
 
+Visual styling is scoped to this screen rather than inherited from Pi's selection background: blue `#63A8F8` with bold black selected text, a gray active tab, and stable FNV-1a identity colors from the default Codex dark theme's Catppuccin Mocha accent family. Project groups have a blank line between them. Home paths use `~`; long group paths are center-truncated to at most 64 cells. The current session and pinned items stay visible alongside the ten most recent unpinned saved sessions; `Show more` expands by ten. Search always covers all saved sessions, including unloaded pages.
+
 - **←** on an empty idle composer, or `/session-history`: open.
 - **↑/↓**, **PgUp/PgDn**: select.
 - **Enter / o**: resume in the selected session's recorded directory, without a manual `cd` or a directory prompt.

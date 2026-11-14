@@ -6,6 +6,7 @@ import { pinKey, readPins, setPinned } from "./pins.ts";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { sessionDetails } from "./details.ts";
+import { codexTheme } from "./codex-style.ts";
 
 export default function sessionHistory(pi: ExtensionAPI) {
   let opening = false;
@@ -41,7 +42,7 @@ export default function sessionHistory(pi: ExtensionAPI) {
         const pinDirectory = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "session-history-pins");
         const pins = await readPins(pinDirectory);
         const tasks: CenterTask[] = sessions.map(s => ({
-          id: s.path, sessionFile: s.path, title: s.name || s.firstMessage || "Untitled task",
+          id: s.path, identityId: s.id, sessionFile: s.path, title: s.name || s.firstMessage || "Untitled task",
           cwd: s.cwd || ctx.cwd, project: s.cwd || ctx.cwd, model: s.path === current ? ctx.model?.id ?? "—" : "—",
           status: s.path === current ? "Ready" : "Inactive", current: s.path === current,
           modified: s.modified, preview: s.firstMessage, pinned: pins.has(pinKey(s.path)),
@@ -50,14 +51,14 @@ export default function sessionHistory(pi: ExtensionAPI) {
           title: ctx.sessionManager.getSessionName?.() || "Untitled task", cwd: ctx.cwd, project: ctx.cwd,
           model: ctx.model?.id ?? "—", status: "Ready", current: true, modified: new Date(), preview: "" });
         const selected = await ctx.ui.custom<string | undefined>((tui, theme, _keys, done) => {
-          const center = new CommandCenter(tasks, theme, () => tui.requestRender(), async (action, task) => {
+          const center = new CommandCenter(tasks, codexTheme(theme), () => tui.requestRender(), async (action, task) => {
             if (!task) return;
             if (action === "open") { done(task.current ? undefined : task.sessionFile); return; }
             if (action === "pin" && task.sessionFile) {
               await setPinned(pinDirectory, task.sessionFile, !task.pinned);
               task.pinned = !task.pinned; center.update(tasks);
             }
-          }, () => done(undefined), () => tui.terminal.rows, { fullHeight: true, actions: ["open", "pin"],
+          }, () => done(undefined), () => tui.terminal.rows, { fullHeight: true, pageSize: 10, actions: ["open", "pin"],
             onSelection: task => {
               if (!task.sessionFile) return;
               void sessionDetails(task.sessionFile).then(details => {
