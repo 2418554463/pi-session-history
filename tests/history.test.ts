@@ -9,8 +9,10 @@ const sessions = [
   { path: "/s/two", id: "2", cwd: "/b", name: "Recent", firstMessage: "write tests", modified: new Date(2), messageCount: 6 },
 ] as any;
 function setup() {
-  const handlers = new Map<string, Function>(); let listener: Function;
-  const unsubscribe = vi.fn(); let draft = ""; let idle = true;
+  const handlers = new Map<string, Function>();
+  let draft = ""; let idle = true;
+  const editor = { handleInput: vi.fn(), isShowingAutocomplete: () => false };
+  let factory: any = () => editor;
   const pi = { on: (key: string, fn: Function) => handlers.set(key, fn),
     registerCommand: vi.fn(), sendUserMessage: vi.fn() };
   extension(pi as any);
@@ -18,14 +20,15 @@ function setup() {
     sessionManager: { getSessionFile: () => "/s/current" },
     switchSession: vi.fn(),
     ui: { notify: vi.fn(), getEditorText: () => draft,
-      setEditorComponent: vi.fn(), confirm: vi.fn().mockResolvedValue(false),
-      onTerminalInput: (fn: Function) => { listener = fn; return unsubscribe; },
+      getEditorComponent: () => factory,
+      setEditorComponent: vi.fn((next: any) => { factory = next; next({}, {}, {}); }), confirm: vi.fn().mockResolvedValue(false),
+      onTerminalInput: vi.fn(),
       custom: vi.fn().mockResolvedValue(undefined),
     },
   };
   handlers.get("session_start")!({}, ctx);
   vi.mocked(SessionManager.listAll).mockResolvedValue(sessions);
-  return { pi, ctx, handlers, unsubscribe, input: (data: string) => listener(data),
+  return { pi, ctx, handlers, editor, input: (data: string) => editor.handleInput(data),
     draft: (text: string) => { draft = text; }, busy: () => { idle = false; },
     command: () => pi.registerCommand.mock.calls[0][1].handler("", ctx),
   };
@@ -38,11 +41,13 @@ it("only allows opening from a completely empty, idle, unblocked composer", () =
   expect(canOpen("", true, false, true)).toBe(false);
 });
 it("left consumes once and dispatches a command without replacing the editor", async () => {
-  const s = setup(); expect(s.input("\x1b[D")).toEqual({ consume: true });
+  const s = setup(); expect(s.input("\x1b[D")).toBeUndefined();
   expect(s.input("\x1b[D")).toBeUndefined();
   await Promise.resolve();
   expect(s.pi.sendUserMessage).toHaveBeenCalledWith("/session-history", { expandPromptTemplates: true });
-  expect(s.ctx.ui.setEditorComponent).not.toHaveBeenCalled();
+  expect(s.pi.sendUserMessage).toHaveBeenCalledTimes(1);
+  expect(s.ctx.ui.onTerminalInput).not.toHaveBeenCalled();
+  expect(s.ctx.ui.getEditorComponent()({}, {}, {})).toBe(s.editor);
 });
 it("does not intercept text editing, modified arrows, active tasks or dialogs", () => {
   const s = setup(); s.draft("text"); expect(s.input("\x1b[D")).toBeUndefined();
@@ -81,6 +86,10 @@ it("renders narrow widths, searches and closes through the component", async () 
   expect(done).toHaveBeenCalledWith("/s/one");
   component.handleInput("\x1b"); expect(done).toHaveBeenCalledWith(undefined);
 });
-it("unsubscribes on session shutdown", () => {
-  const s = setup(); s.handlers.get("session_shutdown")!(); expect(s.unsubscribe).toHaveBeenCalled();
+it("session reinitialization does not stack shortcut wrappers", async () => {
+  const s = setup();
+  s.handlers.get("session_start")!({}, s.ctx);
+  s.input("\x1b[D"); await Promise.resolve();
+  expect(s.pi.sendUserMessage).toHaveBeenCalledTimes(1);
+  expect(s.ctx.ui.setEditorComponent).toHaveBeenCalledTimes(1);
 });

@@ -1,5 +1,5 @@
-import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { CustomEditor, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { attachHistoryShortcut } from "./editor-shortcut.ts";
 import { canOpen } from "./model.ts";
 import { CommandCenter, type CenterTask } from "./command-center.ts";
 import { pinKey, readPins, setPinned } from "./pins.ts";
@@ -11,24 +11,32 @@ import { codexTheme } from "./codex-style.ts";
 export default function sessionHistory(pi: ExtensionAPI) {
   let opening = false;
   let blocked = 0;
-  let unsubscribe: (() => void) | undefined;
+  let installedFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
+  let activeContext: ExtensionContext;
   pi.on("ui_prompt_start", () => { blocked++; });
   pi.on("ui_prompt_end", () => { blocked = Math.max(0, blocked - 1); });
   pi.on("session_start", (_event, ctx) => {
-    opening = false; blocked = 0; unsubscribe?.();
+    opening = false; blocked = 0;
+    activeContext = ctx;
     if (!ctx.hasUI || ("mode" in ctx && ctx.mode !== "tui")) return;
-    unsubscribe = ctx.ui.onTerminalInput(data => {
-      if (!matchesKey(data, "left") || !canOpen(ctx.ui.getEditorText(), ctx.isIdle(), blocked > 0, opening)) return;
-      opening = true;
-      // Dispatch through a command to obtain a command context for switchSession.
-      queueMicrotask(() => {
-        try { pi.sendUserMessage("/session-history", { expandPromptTemplates: true }); }
-        catch (error) { opening = false; ctx.ui.notify(String(error), "error"); }
-      });
-      return { consume: true };
-    });
+    const previous = ctx.ui.getEditorComponent();
+    if (installedFactory && previous === installedFactory) return;
+    installedFactory = (tui, theme, keys) => attachHistoryShortcut(
+      previous?.(tui, theme, keys) ?? new CustomEditor(tui, theme, keys),
+      () => {
+        const ctx = activeContext;
+        if (!canOpen(ctx.ui.getEditorText(), ctx.isIdle(), blocked > 0, opening)) return false;
+        opening = true;
+        // Dispatch through a command to obtain a command context for switchSession.
+        queueMicrotask(() => {
+          try { pi.sendUserMessage("/session-history", { expandPromptTemplates: true }); }
+          catch (error) { opening = false; ctx.ui.notify(String(error), "error"); }
+        });
+        return true;
+      },
+    );
+    ctx.ui.setEditorComponent(installedFactory);
   });
-  pi.on("session_shutdown", () => { unsubscribe?.(); unsubscribe = undefined; opening = false; });
 
   pi.registerCommand("session-history", {
     description: "Search and resume history (empty input: ←)",
